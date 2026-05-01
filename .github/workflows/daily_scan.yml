@@ -23,4 +23,4 @@ jobs:
       - name: Run swing radar
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-        run: python swing_radar.py
+        run: python swing_radar2.py
