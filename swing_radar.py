@@ -159,7 +159,7 @@ print(’Discord: ’ + str(resp.status_code))
 except Exception as e:
 print(‘err:’ + str(e))
 
-if **name** == ‘**main**’:
+if *name* == ‘*main*’:
 results = run_scan()
 send_discord(results)
 print(‘Done!’)
