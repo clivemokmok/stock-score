@@ -1,4 +1,4 @@
-import os
+Import os
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -18,38 +18,29 @@ TIGHT_RANGE_PCT = 0.05
 VCP_LOOKBACK = 15
 
 NASDAQ_100 = [
-    'AAPL','MSFT','NVDA','AMZN','META','GOOGL','GOOG','TSLA','AVGO','COST',
-    'NFLX','AMD','ADBE','QCOM','INTC','INTU','AMAT','AMGN','BKNG','TXN',
-    'MU','LRCX','PANW','KLAC','SNPS','CDNS','MELI','ABNB','REGN','CRWD',
-    'FTNT','MNST','ORLY','CTAS','PCAR','ROST','PAYX','DXCM','ADP','CPRT',
-    'FAST','MRVL','KDP','IDXX','ODFL','BIIB','CTSH','VRSK','ANSS','DLTR',
-    'GEHC','ON','FANG','TEAM','WDAY','ZS','DDOG','ALGN','EBAY','NXPI',
-    'CSCO','TMUS','HON','PEP','SBUX','PYPL','ISRG','VRTX','GILD','CSX',
-    'MRNA','ADSK','CHTR','LULU','MAR','MDLZ','MCHP',
+    'AAPL','MSFT','NVDA','AMZN','META','GOOGL','TSLA','AVGO','COST',
+    'NFLX','AMD','ADBE','QCOM','INTU','AMAT','AMGN','TXN','MU','LRCX',
+    'PANW','CRWD','FTNT','ORLY','CTAS','ROST','PAYX','DXCM','ADP',
+    'MRVL','IDXX','BIIB','VRSK','DLTR','TEAM','WDAY','ZS','DDOG',
+    'EBAY','NXPI','CSCO','TMUS','PEP','SBUX','ISRG','VRTX','GILD',
+    'CSX','ADSK','CHTR','LULU','MAR','MCHP',
 ]
 
 SP500_SELECT = [
-    'JPM','BAC','WFC','GS','MS','BLK','SCHW','AXP','V','MA',
-    'UNH','JNJ','LLY','PFE','ABBV','MRK','BMY','TMO','DHR','ABT',
-    'XOM','CVX','COP','SLB','EOG','OXY','PSX','VLO','MPC','HAL',
-    'HD','LOW','TGT','WMT','TJX','NKE','MCD','YUM',
-    'BA','CAT','DE','MMM','GE','RTX','LMT','NOC','GD',
-    'NEE','DUK','SO','AMT','PLD','CCI','EQIX','SPG','O','WELL',
-    'LIN','APD','SHW','ECL','PPG','UPS','FDX','NSC',
-    'DIS','CMCSA','T','VZ',
+    'JPM','BAC','WFC','GS','MS','V','MA','UNH','JNJ','LLY','PFE',
+    'ABBV','MRK','TMO','DHR','XOM','CVX','COP','HD','LOW','TGT',
+    'WMT','NKE','MCD','BA','CAT','GE','RTX','LMT','NEE','AMT',
+    'PLD','LIN','SHW','UPS','FDX','DIS','CMCSA','VZ',
 ]
 
 ALL_TICKERS = list(set(NASDAQ_100 + SP500_SELECT))
 
-
 def calc_ema(series, span):
     return series.ewm(span=span, adjust=False).mean()
-
 
 def calc_rs(stock_close, spy_close):
     aligned_spy = spy_close.reindex(stock_close.index, method='ffill')
     return stock_close / aligned_spy
-
 
 def check_minervini(hist, spy_hist):
     close = hist['Close']
@@ -78,7 +69,6 @@ def check_minervini(hist, spy_hist):
     passed = trend_ok and momentum_ok and position_ok and rs_ok
     detail = {
         'price': round(lc, 2),
-        'ema10': round(e10, 2),
         'ema20': round(e20, 2),
         'ema50': round(e50, 2),
         'high_52w': round(high_52w, 2),
@@ -86,7 +76,6 @@ def check_minervini(hist, spy_hist):
         'rs_vs_ma': round(rs_vs_ma, 1),
     }
     return passed, detail
-
 
 def check_setups(hist, detail):
     close = hist['Close']
@@ -120,12 +109,10 @@ def check_setups(hist, detail):
             vcp_flag = False
             if len(high) >= VCP_LOOKBACK:
                 mid = VCP_LOOKBACK // 2
-                h_f = float(high.iloc[-VCP_LOOKBACK:-mid].max())
                 l_f = float(low.iloc[-VCP_LOOKBACK:-mid].min())
-                h_l = float(high.iloc[-mid:].max())
                 l_l = float(low.iloc[-mid:].min())
-                rf = (h_f - l_f) / l_f if l_f > 0 else 0
-                rl = (h_l - l_l) / l_l if l_l > 0 else 0
+                rf = (float(high.iloc[-VCP_LOOKBACK:-mid].max()) - l_f) / l_f if l_f > 0 else 0
+                rl = (float(high.iloc[-mid:].max()) - l_l) / l_l if l_l > 0 else 0
                 vcp_flag = (rl < rf * 0.75) and rf > 0
             setups.append({
                 'type': 'Setup2',
@@ -134,5 +121,111 @@ def check_setups(hist, detail):
             })
     return setups
 
+def run_scan():
+    print('===== Swing Radar =====')
+    spy_hist = yf.download('SPY', period='1y', auto_adjust=True, progress=False)
+    if spy_hist.empty:
+        print('SPY failed')
+        return []
+    all_hist = {}
+    for i in range(0, len(ALL_TICKERS), 50):
+        batch = ALL_TICKERS[i:i+50]
+        try:
+            data = yf.download(
+                ' '.join(batch), period='1y',
+                auto_adjust=True, progress=False,
+                group_by='ticker', threads=True,
+            )
+            if len(batch) == 1:
+                all_hist[batch[0]] = data
+            else:
+                for t in batch:
+                    try:
+                        if t in data.columns.get_level_values(0):
+                            td = data[t].dropna()
+                            if not td.empty:
+                                all_hist[t] = td
+                    except Exception:
+                        pass
+        except Exception as e:
+            print('err:' + str(e))
+        time.sleep(0.5)
+    print('Loaded: ' + str(len(all_hist)))
+    results = []
+    for ticker in ALL_TICKERS:
+        hist = all_hist.get(ticker)
+        if hist is None or len(hist) < 210:
+            continue
+        if float(hist['Close'].iloc[-1]) < MIN_PRICE:
+            continue
+        if float(hist['Volume'].tail(50).mean()) < MIN_AVG_VOL_50:
+            continue
+        passed, detail = check_minervini(hist, spy_hist)
+        if not passed:
+            continue
+        detail['ticker'] = ticker
+        for setup in check_setups(hist, detail):
+            results.append({**detail, **setup})
+    print('Setups: ' + str(len(results)))
+    return results
 
-def run_scan​​​​​​​​​​​​​​​​
+def send_discord(results):
+    if not DISCORD_WEBHOOK_URL:
+        print('No webhook')
+        return
+    today = date.today().strftime('%Y-%m-%d')
+    s1 = [r for r in results if r['type'] == 'Setup1']
+    s2 = [r for r in results if r['type'] == 'Setup2']
+    embed = {
+        'title': today + ' Swing Radar',
+        'description': 'Found ' + str(len(results)) + ' setups',
+        'color': 56575 if results else 16724818,
+        'timestamp': datetime.utcnow().isoformat(),
+        'footer': {'text': 'Swing Radar'},
+        'fields': [],
+    }
+    if s1:
+        lines = [
+            '$' + r['ticker'] + ' $' + str(r['price']) +
+            ' ' + r.get('ema_name', '') +
+            ' vol ' + str(r.get('vol_ratio', 0)) + 'x'
+            for r in s1
+        ]
+        embed['fields'].append({
+            'name': 'Setup1 EMA Pullback (' + str(len(s1)) + ')',
+            'value': '\n'.join(lines),
+            'inline': False,
+        })
+    if s2:
+        lines = [
+            '$' + r['ticker'] + ' $' + str(r['price']) +
+            ' ' + str(r.get('range_pct', 0)) + '%' +
+            (' VCP' if r.get('vcp') else '')
+            for r in s2
+        ]
+        embed['fields'].append({
+            'name': 'Setup2 Tight Base (' + str(len(s2)) + ')',
+            'value': '\n'.join(lines),
+            'inline': False,
+        })
+    if not results:
+        embed['fields'].append({
+            'name': 'Result',
+            'value': 'No setups today.',
+            'inline': False,
+        })
+    try:
+        resp = requests.post(
+            DISCORD_WEBHOOK_URL,
+            data=json.dumps({'embeds': [embed]}),
+            headers={'Content-Type': 'application/json'},
+            timeout=10,
+        )
+        print('Discord: ' + str(resp.status_code))
+    except Exception as e:
+        print('err:' + str(e))
+
+if __name__ == '__main__':
+    results = run_scan()
+    send_discord(results)
+    print('Done!')
