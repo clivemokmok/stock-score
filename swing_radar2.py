@@ -50,8 +50,10 @@ def check_minervini(hist, spy_hist):
     position_ok = from_high >= -MAX_FROM_52W_HIGH
     rs_series = calc_rs(close, spy_hist['Close'])
     rs_ma50 = rs_series.rolling(50).mean()
-    rs_ok = float(rs_series.iloc[-1]) > float(rs_ma50.iloc[-1])
-    rs_vs_ma = (float(rs_series.iloc[-1]) / float(rs_ma50.iloc[-1]) - 1) * 100
+    rs_last = float(rs_series.dropna().iloc[-1]) if not hasattr(rs_series.dropna().iloc[-1], "iloc") else float(rs_series.dropna().iloc[-1].iloc[0])
+    rs_ma_last = float(rs_ma50.dropna().iloc[-1]) if not hasattr(rs_ma50.dropna().iloc[-1], "iloc") else float(rs_ma50.dropna().iloc[-1].iloc[0])
+    rs_ok = rs_last > rs_ma_last
+    rs_vs_ma = (rs_last / rs_ma_last - 1) * 100
     passed = trend_ok and momentum_ok and position_ok and rs_ok
     detail = {'price': round(lc,2), 'ema20': round(e20,2), 'ema50': round(e50,2), 'high_52w': round(high_52w,2), 'from_high': round(from_high*100,1), 'rs_vs_ma': round(rs_vs_ma,1)}
     return passed, detail
