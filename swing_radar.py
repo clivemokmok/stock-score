@@ -7,9 +7,10 @@ import json
 from datetime import datetime, date, timedelta
 import time
 import warnings
-warnings.filterwarnings("ignore")
+warnings.filterwarnings('ignore')
 
-DISCORD_WEBHOOK_URL = os.environ.get(“DISCORD_WEBHOOK_URL”, “”)
+DISCORD_WEBHOOK_URL = os.environ.get('DISCORD_WEBHOOK_URL') or ''
+
 MIN_PRICE = 10.0
 MIN_AVG_VOL_50 = 500000
 MAX_FROM_52W_HIGH = 0.25
