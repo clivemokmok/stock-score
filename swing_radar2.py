@@ -162,3 +162,9 @@ spy = yf.download('SPY', period='1y', auto_adjust=True, progress=False)
 print(type(spy['Close'].iloc[-1]))
 print(spy['Close'].iloc[-1])
 "
+python3 -c "
+lines = open('swing_radar2.py').readlines()
+good = [l for l in lines if not l.strip().startswith('python3')]
+open('swing_radar2.py','w').writelines(good)
+print('fixed, lines:', len(good))
+"
