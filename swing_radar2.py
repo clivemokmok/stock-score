@@ -181,7 +181,7 @@ def send_discord(results):
     except Exception as e:
         print('err:' + str(e))
 
-if _name_ == '_main_':
+if __name__ == '__main__':
     results = run_scan()
     send_discord(results)
     print('Done!')
