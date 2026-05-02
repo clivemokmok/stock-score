@@ -115,15 +115,23 @@ def check_setups(hist, detail):
                 rl = (float(high.iloc[-mid:].max()) - float(low.iloc[-mid:].min())) / float(low.iloc[-mid:].min()) if float(low.iloc[-mid:].min()) > 0 else 0
                 vcp_flag = (rl < rf * 0.75) and rf > 0
             setups.append({'type': 'Setup2', 'range_pct': round(rng5*100,1), 'vcp': vcp_flag})
+    if len(close) >= 20 and len(volume) >= 50:
+        high20 = float(close.iloc[-20:-1].max())
+        today_close = float(close.iloc[-1])
+        today_vol = float(volume.iloc[-1])
+        avg_vol = float(avg_vol_50.iloc[-1]) if not pd.isna(avg_vol_50.iloc[-1]) else 0
+        if today_close > high20 and avg_vol > 0 and today_vol >= avg_vol * 1.5:
+            setups.append({'type': 'Setup3', 'vol_ratio': round(today_vol / avg_vol, 2), 'high20': round(high20, 2)})
     return setups
 
 def run_scan():
     ALL_TICKERS = get_tickers_from_tv()
+    scanned_count = len(ALL_TICKERS)
     print('===== Swing Radar =====')
     spy_hist = yf.download('SPY', period='2y', auto_adjust=True, progress=False)
     if spy_hist.empty:
         print('SPY failed')
-        return []
+        return [], scanned_count
     all_hist = {}
     for i in range(0, len(ALL_TICKERS), 50):
         batch = ALL_TICKERS[i:i+50]
@@ -159,20 +167,23 @@ def run_scan():
         for setup in check_setups(hist, detail):
             results.append({**detail, **setup})
     print('Setups: ' + str(len(results)))
-    return results
+    return results, scanned_count
 
-def send_discord(results):
+def send_discord(results, scanned_count=0):
     if not DISCORD_WEBHOOK_URL:
         print('No webhook')
         return
     today = date.today().strftime('%Y-%m-%d')
     s1 = [r for r in results if r['type'] == 'Setup1']
     s2 = [r for r in results if r['type'] == 'Setup2']
-    embed = {'title': today + ' Swing Radar', 'description': 'Found ' + str(len(results)), 'color': 56575, 'fields': []}
+    s3 = [r for r in results if r['type'] == 'Setup3']
+    embed = {'title': today + ' Swing Radar', 'description': 'Scanned ' + str(scanned_count) + ' tickers | Found ' + str(len(results)) + ' setups', 'color': 56575, 'fields': []}
     if s1:
         embed['fields'].append({'name': 'Setup1 EMA Pullback', 'value': '\n'.join(['$'+r['ticker']+' $'+str(r['price'])+' '+r.get('ema_name','')+' vol '+str(r.get('vol_ratio',0))+'x' for r in s1]), 'inline': False})
     if s2:
         embed['fields'].append({'name': 'Setup2 Tight Base', 'value': '\n'.join(['$'+r['ticker']+' $'+str(r['price'])+' '+str(r.get('range_pct',0))+'%'+(' VCP' if r.get('vcp') else '') for r in s2]), 'inline': False})
+    if s3:
+        embed['fields'].append({'name': 'Setup3 Breakout', 'value': '\n'.join(['$'+r['ticker']+' $'+str(r['price'])+' vol '+str(r.get('vol_ratio',0))+'x | 20d high $'+str(r.get('high20',0)) for r in s3]), 'inline': False})
     if not results:
         embed['fields'].append({'name': 'Result', 'value': 'No setups today.', 'inline': False})
     try:
@@ -182,6 +193,6 @@ def send_discord(results):
         print('err:' + str(e))
 
 if __name__ == '__main__':
-    results = run_scan()
-    send_discord(results)
+    results, scanned_count = run_scan()
+    send_discord(results, scanned_count)
     print('Done!')
