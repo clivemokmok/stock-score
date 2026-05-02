@@ -19,7 +19,31 @@ VCP_LOOKBACK = 15
 
 NASDAQ_100 = ['AAPL','MSFT','NVDA','AMZN','META','GOOGL','TSLA','AVGO','COST','NFLX','AMD','ADBE','QCOM','INTU','AMAT','AMGN','TXN','MU','LRCX','PANW','CRWD','FTNT','ORLY','CTAS','ROST','PAYX','DXCM','ADP','MRVL','IDXX','BIIB','VRSK','DLTR','TEAM','WDAY','ZS','DDOG','EBAY','NXPI','CSCO','TMUS','PEP','SBUX','ISRG','VRTX','GILD','CSX','ADSK','CHTR','LULU','MAR','MCHP']
 SP500_SELECT = ['JPM','BAC','WFC','GS','MS','V','MA','UNH','JNJ','LLY','PFE','ABBV','MRK','TMO','DHR','XOM','CVX','COP','HD','LOW','TGT','WMT','NKE','MCD','BA','CAT','GE','RTX','LMT','NEE','AMT','PLD','LIN','SHW','UPS','FDX','DIS','CMCSA','VZ']
-ALL_TICKERS = list(set(NASDAQ_100 + SP500_SELECT))
+
+def get_tickers_from_tv():
+    url = 'https://scanner.tradingview.com/america/scan'
+    payload = {
+        'filter': [
+            {'left': 'exchange', 'operation': 'in_range', 'right': ['NASDAQ', 'NYSE', 'AMEX']},
+            {'left': 'market_cap_basic', 'operation': 'greater', 'right': 2000000000},
+            {'left': 'EMA50', 'operation': 'greater', 'right': 'EMA200'},
+            {'left': 'close', 'operation': 'greater', 'right': 'EMA50'},
+            {'left': 'EMA10', 'operation': 'greater', 'right': 'EMA20'},
+            {'left': 'beta_1_year', 'operation': 'greater', 'right': 1},
+            {'left': 'Perf.YTD', 'operation': 'greater', 'right': 10},
+            {'left': 'average_volume_30d_calc', 'operation': 'greater', 'right': 3000000}
+        ],
+        'columns': ['name'],
+        'range': [0, 200]
+    }
+    try:
+        r = requests.post(url, json=payload, timeout=10)
+        tickers = [x['d'][0] for x in r.json()['data']]
+        print('TV Screener: ' + str(len(tickers)) + ' tickers')
+        return tickers
+    except Exception as e:
+        print('TV Screener failed: ' + str(e))
+        return ['AAPL','MSFT','NVDA','AMZN','META','GOOGL','TSLA']
 
 def calc_ema(series, span):
     return series.ewm(span=span, adjust=False).mean()
@@ -94,6 +118,7 @@ def check_setups(hist, detail):
     return setups
 
 def run_scan():
+    ALL_TICKERS = get_tickers_from_tv()
     print('===== Swing Radar =====')
     spy_hist = yf.download('SPY', period='2y', auto_adjust=True, progress=False)
     if spy_hist.empty:
@@ -156,8 +181,7 @@ def send_discord(results):
     except Exception as e:
         print('err:' + str(e))
 
-if __name__ == '__main__':
+if _name_ == '_main_':
     results = run_scan()
     send_discord(results)
     print('Done!')
-
