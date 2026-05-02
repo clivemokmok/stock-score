@@ -156,3 +156,9 @@ if __name__ == '__main__':
     results = run_scan()
     send_discord(results)
     print('Done!')
+python3 -c "
+import yfinance as yf
+spy = yf.download('SPY', period='1y', auto_adjust=True, progress=False)
+print(type(spy['Close'].iloc[-1]))
+print(spy['Close'].iloc[-1])
+"
