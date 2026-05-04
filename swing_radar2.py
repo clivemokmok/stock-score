@@ -20,6 +20,12 @@ NASDAQ_100 = ['AAPL','MSFT','NVDA','AMZN','META','GOOGL','TSLA','AVGO','COST','N
 SP500_SELECT = ['JPM','BAC','WFC','GS','MS','V','MA','UNH','JNJ','LLY','PFE','ABBV','MRK','TMO','DHR','XOM','CVX','COP','HD','LOW','TGT','WMT','NKE','MCD','BA','CAT','GE','RTX','LMT','NEE','AMT','PLD','LIN','SHW','UPS','FDX','DIS','CMCSA','VZ']
 
 def get_tickers_from_tv():
+    """
+    放寬版 TV Screener：
+    移除 Beta、YTD、EMA10>EMA20 條件
+    目標：股票池由 ~84 隻擴大至 400-600 隻
+    保留 Minervini + Setup2/3 做高質過濾
+    """
     url = 'https://scanner.tradingview.com/america/scan'
     payload = {
         'filter': [
@@ -27,13 +33,10 @@ def get_tickers_from_tv():
             {'left': 'market_cap_basic', 'operation': 'greater', 'right': 2000000000},
             {'left': 'EMA50', 'operation': 'greater', 'right': 'EMA200'},
             {'left': 'close', 'operation': 'greater', 'right': 'EMA50'},
-            {'left': 'EMA10', 'operation': 'greater', 'right': 'EMA20'},
-            {'left': 'beta_1_year', 'operation': 'greater', 'right': 1},
-            {'left': 'Perf.YTD', 'operation': 'greater', 'right': 10},
-            {'left': 'average_volume_30d_calc', 'operation': 'greater', 'right': 3000000}
+            {'left': 'average_volume_30d_calc', 'operation': 'greater', 'right': 1000000}
         ],
         'columns': ['name'],
-        'range': [0, 200]
+        'range': [0, 500]
     }
     try:
         r = requests.post(url, json=payload, timeout=10)
@@ -87,8 +90,10 @@ def check_minervini(hist, spy_hist):
 
 def check_setups(hist, detail):
     """
-    v4 邏輯：只保留 Setup2 (VCP放量突破) + Setup3 (20日新高放量)
-    已移除 Setup1 (EMA回踩) — 回測證明勝率只有 41.9%
+    v4 邏輯：
+    - Setup1 (EMA回踩) 已移除 — 回測勝率只有 41.9%
+    - Setup2 (VCP放量突破) — 回測勝率 53.7%
+    - Setup3 (20日新高放量) — 額外突破訊號
     """
     close = hist['Close']
     high = hist['High']
@@ -97,17 +102,20 @@ def check_setups(hist, detail):
     avg_vol_50 = volume.rolling(50).mean()
     setups = []
 
-    # ---- Setup2: VCP 緊密整固 + 放量突破 (v4 升級版) ----
+    # ---- Setup2: VCP 緊密整固 + 放量突破 ----
+    # 前5日波幅 < 5% + 今日收市突破前5日高位 + 放量
     if len(high) >= 6:
-        h5 = float(high.iloc[-6:-1].max())
-        l5 = float(low.iloc[-6:-1].min())
+        h5 = float(high.iloc[-6:-1].max())    # 前5日最高（唔包今日）
+        l5 = float(low.iloc[-6:-1].min())     # 前5日最低（唔包今日）
         today_close = float(close.iloc[-1])
         today_vol = float(volume.iloc[-1])
         avg_vol = float(avg_vol_50.iloc[-1]) if not pd.isna(avg_vol_50.iloc[-1]) else 0
+
         if l5 > 0 and avg_vol > 0:
             tight_range = (h5 - l5) / l5 < TIGHT_RANGE_PCT
             breakout = today_close > h5
             volume_ok = today_vol > avg_vol
+
             if tight_range and breakout and volume_ok:
                 vcp_flag = False
                 if len(high) >= VCP_LOOKBACK:
@@ -115,17 +123,26 @@ def check_setups(hist, detail):
                     rf = (float(high.iloc[-VCP_LOOKBACK:-mid].max()) - float(low.iloc[-VCP_LOOKBACK:-mid].min())) / float(low.iloc[-VCP_LOOKBACK:-mid].min()) if float(low.iloc[-VCP_LOOKBACK:-mid].min()) > 0 else 0
                     rl = (float(high.iloc[-mid:].max()) - float(low.iloc[-mid:].min())) / float(low.iloc[-mid:].min()) if float(low.iloc[-mid:].min()) > 0 else 0
                     vcp_flag = (rl < rf * 0.75) and rf > 0
-                vol_ratio = round(today_vol / avg_vol, 2)
-                setups.append({'type': 'Setup2', 'range_pct': round((h5-l5)/l5*100, 1), 'vcp': vcp_flag, 'vol_ratio': vol_ratio, 'breakout_price': round(h5, 2)})
+                setups.append({
+                    'type': 'Setup2',
+                    'range_pct': round((h5-l5)/l5*100, 1),
+                    'vcp': vcp_flag,
+                    'vol_ratio': round(today_vol / avg_vol, 2),
+                    'breakout_price': round(h5, 2)
+                })
 
-    # ---- Setup3: 20 日新高 + 成交量 >= 1.5x 均量 ----
+    # ---- Setup3: 20日新高 + 成交量 >= 1.5x 均量 ----
     if len(close) >= 20 and len(volume) >= 50:
         high20 = float(close.iloc[-20:-1].max())
         today_close = float(close.iloc[-1])
         today_vol = float(volume.iloc[-1])
         avg_vol = float(avg_vol_50.iloc[-1]) if not pd.isna(avg_vol_50.iloc[-1]) else 0
         if today_close > high20 and avg_vol > 0 and today_vol >= avg_vol * 1.5:
-            setups.append({'type': 'Setup3', 'vol_ratio': round(today_vol / avg_vol, 2), 'high20': round(high20, 2)})
+            setups.append({
+                'type': 'Setup3',
+                'vol_ratio': round(today_vol / avg_vol, 2),
+                'high20': round(high20, 2)
+            })
 
     return setups
 
