@@ -13,7 +13,6 @@ DISCORD_WEBHOOK_URL = os.environ.get('DISCORD_WEBHOOK_URL') or ''
 MIN_PRICE = 10.0
 MIN_AVG_VOL_50 = 500000
 MAX_FROM_52W_HIGH = 0.25
-EMA_TOUCH_PCT = 0.015
 TIGHT_RANGE_PCT = 0.05
 VCP_LOOKBACK = 15
 
@@ -43,7 +42,7 @@ def get_tickers_from_tv():
         return tickers
     except Exception as e:
         print('TV Screener failed: ' + str(e))
-        return ['AAPL','MSFT','NVDA','AMZN','META','GOOGL','TSLA']
+        return list(set(NASDAQ_100 + SP500_SELECT))
 
 def calc_ema(series, span):
     return series.ewm(span=span, adjust=False).mean()
@@ -87,34 +86,39 @@ def check_minervini(hist, spy_hist):
     return passed, detail
 
 def check_setups(hist, detail):
+    """
+    v4 邏輯：只保留 Setup2 (VCP放量突破) + Setup3 (20日新高放量)
+    已移除 Setup1 (EMA回踩) — 回測證明勝率只有 41.9%
+    """
     close = hist['Close']
-    low = hist['Low']
     high = hist['High']
+    low = hist['Low']
     volume = hist['Volume']
-    ema20 = calc_ema(close, 20)
-    ema50 = calc_ema(close, 50)
     avg_vol_50 = volume.rolling(50).mean()
     setups = []
-    for ema_series, ema_name in [(ema20, 'EMA20'), (ema50, 'EMA50')]:
-        ema_val = float(ema_series.iloc[-1])
-        recent_lows = [float(low.iloc[-1]), float(low.iloc[-2])]
-        touched = any(abs(l - ema_val) / ema_val <= EMA_TOUCH_PCT for l in recent_lows)
-        above = float(close.iloc[-1]) > ema_val
-        low_vol = float(volume.iloc[-1]) < float(avg_vol_50.iloc[-1])
-        if touched and above and low_vol:
-            setups.append({'type': 'Setup1', 'ema_name': ema_name, 'ema_val': round(ema_val,2), 'vol_ratio': round(float(volume.iloc[-1])/float(avg_vol_50.iloc[-1]),2), 'vcp': False})
-    if len(high) >= 5:
-        h5 = float(high.iloc[-5:].max())
-        l5 = float(low.iloc[-5:].min())
-        rng5 = (h5 - l5) / l5
-        if rng5 < TIGHT_RANGE_PCT:
-            vcp_flag = False
-            if len(high) >= VCP_LOOKBACK:
-                mid = VCP_LOOKBACK // 2
-                rf = (float(high.iloc[-VCP_LOOKBACK:-mid].max()) - float(low.iloc[-VCP_LOOKBACK:-mid].min())) / float(low.iloc[-VCP_LOOKBACK:-mid].min()) if float(low.iloc[-VCP_LOOKBACK:-mid].min()) > 0 else 0
-                rl = (float(high.iloc[-mid:].max()) - float(low.iloc[-mid:].min())) / float(low.iloc[-mid:].min()) if float(low.iloc[-mid:].min()) > 0 else 0
-                vcp_flag = (rl < rf * 0.75) and rf > 0
-            setups.append({'type': 'Setup2', 'range_pct': round(rng5*100,1), 'vcp': vcp_flag})
+
+    # ---- Setup2: VCP 緊密整固 + 放量突破 (v4 升級版) ----
+    if len(high) >= 6:
+        h5 = float(high.iloc[-6:-1].max())
+        l5 = float(low.iloc[-6:-1].min())
+        today_close = float(close.iloc[-1])
+        today_vol = float(volume.iloc[-1])
+        avg_vol = float(avg_vol_50.iloc[-1]) if not pd.isna(avg_vol_50.iloc[-1]) else 0
+        if l5 > 0 and avg_vol > 0:
+            tight_range = (h5 - l5) / l5 < TIGHT_RANGE_PCT
+            breakout = today_close > h5
+            volume_ok = today_vol > avg_vol
+            if tight_range and breakout and volume_ok:
+                vcp_flag = False
+                if len(high) >= VCP_LOOKBACK:
+                    mid = VCP_LOOKBACK // 2
+                    rf = (float(high.iloc[-VCP_LOOKBACK:-mid].max()) - float(low.iloc[-VCP_LOOKBACK:-mid].min())) / float(low.iloc[-VCP_LOOKBACK:-mid].min()) if float(low.iloc[-VCP_LOOKBACK:-mid].min()) > 0 else 0
+                    rl = (float(high.iloc[-mid:].max()) - float(low.iloc[-mid:].min())) / float(low.iloc[-mid:].min()) if float(low.iloc[-mid:].min()) > 0 else 0
+                    vcp_flag = (rl < rf * 0.75) and rf > 0
+                vol_ratio = round(today_vol / avg_vol, 2)
+                setups.append({'type': 'Setup2', 'range_pct': round((h5-l5)/l5*100, 1), 'vcp': vcp_flag, 'vol_ratio': vol_ratio, 'breakout_price': round(h5, 2)})
+
+    # ---- Setup3: 20 日新高 + 成交量 >= 1.5x 均量 ----
     if len(close) >= 20 and len(volume) >= 50:
         high20 = float(close.iloc[-20:-1].max())
         today_close = float(close.iloc[-1])
@@ -122,12 +126,13 @@ def check_setups(hist, detail):
         avg_vol = float(avg_vol_50.iloc[-1]) if not pd.isna(avg_vol_50.iloc[-1]) else 0
         if today_close > high20 and avg_vol > 0 and today_vol >= avg_vol * 1.5:
             setups.append({'type': 'Setup3', 'vol_ratio': round(today_vol / avg_vol, 2), 'high20': round(high20, 2)})
+
     return setups
 
 def run_scan():
     ALL_TICKERS = get_tickers_from_tv()
     scanned_count = len(ALL_TICKERS)
-    print('===== Swing Radar =====')
+    print('===== Swing Radar (v4) =====')
     spy_hist = yf.download('SPY', period='2y', auto_adjust=True, progress=False)
     if spy_hist.empty:
         print('SPY failed')
@@ -174,16 +179,38 @@ def send_discord(results, scanned_count=0):
         print('No webhook')
         return
     today = date.today().strftime('%Y-%m-%d')
-    s1 = [r for r in results if r['type'] == 'Setup1']
     s2 = [r for r in results if r['type'] == 'Setup2']
     s3 = [r for r in results if r['type'] == 'Setup3']
-    embed = {'title': today + ' Swing Radar', 'description': 'Scanned ' + str(scanned_count) + ' tickers | Found ' + str(len(results)) + ' setups', 'color': 56575, 'fields': []}
-    if s1:
-        embed['fields'].append({'name': 'Setup1 EMA Pullback', 'value': '\n'.join(['$'+r['ticker']+' $'+str(r['price'])+' '+r.get('ema_name','')+' vol '+str(r.get('vol_ratio',0))+'x' for r in s1]), 'inline': False})
+    embed = {
+        'title': today + ' Swing Radar (v4)',
+        'description': 'Scanned ' + str(scanned_count) + ' tickers | Found ' + str(len(results)) + ' setups',
+        'color': 3066993,
+        'fields': []
+    }
     if s2:
-        embed['fields'].append({'name': 'Setup2 Tight Base', 'value': '\n'.join(['$'+r['ticker']+' $'+str(r['price'])+' '+str(r.get('range_pct',0))+'%'+(' VCP' if r.get('vcp') else '') for r in s2]), 'inline': False})
+        embed['fields'].append({
+            'name': 'Setup2 VCP突破 (勝率53%)',
+            'value': '\n'.join([
+                '$'+r['ticker']+' $'+str(r['price'])+
+                ' | 波幅'+str(r.get('range_pct',0))+'%'+
+                (' VCP' if r.get('vcp') else '')+
+                ' | 量'+str(r.get('vol_ratio',0))+'x'+
+                ' | 突破$'+str(r.get('breakout_price',0))
+                for r in s2
+            ]),
+            'inline': False
+        })
     if s3:
-        embed['fields'].append({'name': 'Setup3 Breakout', 'value': '\n'.join(['$'+r['ticker']+' $'+str(r['price'])+' vol '+str(r.get('vol_ratio',0))+'x | 20d high $'+str(r.get('high20',0)) for r in s3]), 'inline': False})
+        embed['fields'].append({
+            'name': 'Setup3 20日新高放量',
+            'value': '\n'.join([
+                '$'+r['ticker']+' $'+str(r['price'])+
+                ' | 量'+str(r.get('vol_ratio',0))+'x'+
+                ' | 前高$'+str(r.get('high20',0))
+                for r in s3
+            ]),
+            'inline': False
+        })
     if not results:
         embed['fields'].append({'name': 'Result', 'value': 'No setups today.', 'inline': False})
     try:
